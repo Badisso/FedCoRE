@@ -1,0 +1,644 @@
+/***************************************************************************//**
+ * @file
+ * @brief MTD application logic.
+ *******************************************************************************
+ * # License
+ * <b>Copyright 2021 Silicon Laboratories Inc. www.silabs.com</b>
+ *******************************************************************************
+ *
+ * The licensor of this software is Silicon Laboratories Inc. Your use of this
+ * software is governed by the terms of Silicon Labs Master Software License
+ * Agreement (MSLA) available at
+ * www.silabs.com/about-us/legal/master-software-license-agreement. This
+ * software is distributed to you in Source Code format and is governed by the
+ * sections of the MSLA applicable to Source Code.
+ *
+ ******************************************************************************/
+// Define module name for Power Manager debuging feature.
+#define CURRENT_MODULE_NAME    "OPENTHREAD_SAMPLE_APP"
+
+#include <string.h>
+#include <assert.h>
+
+#include <openthread/cli.h>
+#include <openthread/dataset_ftd.h>
+#include <openthread/instance.h>
+#include <openthread/message.h>
+#include <openthread/thread.h>
+#include <openthread/udp.h>
+#include <openthread/platform/logging.h>
+#include <common/code_utils.hpp>
+#include <common/logging.hpp>
+#include <openthread/thread.h>
+#include <openthread/coap.h>
+#include "utils/code_utils.h"
+
+#include "sl_button.h"
+#include "sl_simple_button.h"
+#include "sl_simple_button_instances.h"
+#include "sl_led.h"
+#include "sl_simple_led_instances.h"
+
+#include "tflite-model/trained_model_compiled.h"
+
+#include "sl_component_catalog.h"
+#ifdef SL_CATALOG_POWER_MANAGER_PRESENT
+#include "sl_power_manager.h"
+#endif
+
+// Constants
+#define MULTICAST_ADDR "ff03::1"
+#define MULTICAST_PORT 123
+#define RECV_PORT 234
+#define SLEEPY_POLL_PERIOD_MS 2000
+#define MTD_MESSAGE "mtd button"
+#define FTD_MESSAGE "ftd button"
+
+#define TEMPERATURE_URI     "Local_Model"
+otCoapResource mResource_Temperature;
+otCoapResource mResource_Heartbit;
+otCoapResource mResource_actualinf;
+char *mDDLStateUriPath=TEMPERATURE_URI;
+uint16_t myText_length = 0;
+#define HEART "heartbit"
+#define actual "actualinf"
+char *heartUriPath = HEART;
+char *actualinfUriPath = actual;
+
+static uint8_t get_post_state[30] = "modeldata1";
+float accuracy = 50.77776f;
+// Local_Model declaration
+int8_t model_data1[20*33] = {34, -56, 49, 12, 12, 9, 73, 40, -67, 13, 76, -19, -57, 74, 35, 82, 76, -27, 57, -54, 72, -76, 114, -61, -49, -49, -76, 34, -33, -29, -53, -74, 16,
+    12, 19, 1, -32, 17, 79, 53, 69, -68, 55, 44, -40, -17, -71, -47, -34, -31, -70, 58, 38, -6, -45, -67, -47, 27, -47, 21, 40, -44, 5, 67, 77, -81,
+    -1, -83, -66, 35, 0, 19, -80, -20, -53, 8, -28, -20, -62, -18, 44, -70, -57, -20, 70, -81, 57, -12, -42, 17, -38, 70, 9, -43, -13, -50, -55, 63, -73,
+    -127, -23, -67, 35, 22, 24, -58, 13, 13, 72, 0, -109, 13, 37, 7, -41, -23, -18, 79, 49, -84, -53, 77, -7, -12, 77, 5, -27, 64, 15, 0, 62, 6,
+    1, 47, -50, 53, 27, 75, -64, -33, 16, 26, 28, 3, -6, -17, -72, -4, -41, -37, 19, 15, 14, -34, -32, 19, -9, -38, 73, 34, 77, -1, 5, -45, -42,
+    94, -48, -16, -14, -2, 31, 20, 28, -2, -70, -41, 5, 77, -40, 62, 15, -43, 30, 57, 71, -41, -78, 52, 22, -9, 39, 14, -33, 46, 28, 38, 80, 4,
+    -53, 76, -11, -30, -32, 25, 25, -19, -39, 45, -70, -31, -83, -60, 73, 20, -17, 40, 23, -30, 16, -10, 108, -63, 21, 2, -41, 14, 21, -23, 37, -25, -53,
+    -28, 82, -57, -20, -69, 77, 12, -78, 67, -65, 53, -45, -61, -37, -47, -9, -2, -66, 5, -24, -26, -67, -81, -17, -13, -73, 58, 26, 31, 58, -74, 70, -74,
+    45, 34, 31, -80, 52, 39, -27, -17, 35, -66, -83, 96, 6, -33, -85, -52, 15, -15, 61, -1, -10, -24, 5, -40, -31, 74, -72, 19, 66, -1, -30, 31, -37,
+    -4, 16, 8, 41, -73, -4, -7, -32, 42, -15, 3, -27, -40, -4, 7, -36, 22, 74, 68, -68, 53, -53, -6, 70, 64, -62, -29, -53, 73, 48, -65, 25, -3,
+    -48, -70, -80, -63, 79, -28, 27, -3, 12, 57, 6, 90, 16, 71, -10, -62, -53, 51, -26, -9, -46, 4, 78, -59, -20, 27, -61, 47, 29, -70, 80, -15, -78,
+    81, 46, -4, -15, 9, 82, 21, 59, 65, 79, -18, 82, 11, -57, -50, 37, 12, 49, 65, 61, 42, -33, 38, 37, 76, -58, -18, 67, -53, 51, -73, 33, -55,
+    24, 57, 14, -48, 65, -27, 22, -37, -12, 78, -6, -49, -60, 70, 74, -81, 43, -5, -80, -18, -78, -17, 67, -23, -79, -10, -62, 25, 66, -35, 56, -28, -27,
+    -4, 20, -24, 56, 11, -20, 41, -17, 26, 63, 81, 61, 40, -35, 4, 18, -49, -44, 23, 68, -82, -31, 22, -38, -88, 67, 46, 15, 73, -37, -83, 85, 24,
+    -50, -84, 83, -40, 40, -29, 43, 52, 8, -31, -71, -14, -69, -22, 8, -13, -45, -38, -36, -49, 18, 35, -48, 30, 48, 3, -62, -12, -35, 5, 13, -2, 60,
+    -23, 81, -26, 29, -21, 73, -51, -42, -12, 68, -49, 63, -34, -24, 83, -64, -7, 57, 52, 58, 20, -37, 54, -75, -44, -25, 51, 30, 8, 8, -78, -69, -74,
+    -63, 72, 50, 14, -3, 0, -9, -40, -10, 26, 3, -68, -48, -75, -54, 40, 58, 41, -70, -10, -40, -76, -38, 63, 52, 32, -18, 10, 83, 78, 6, -15, -8,
+    -48, 5, -80, -72, 74, -35, 14, 60, -48, 7, 7, 27, 18, -26, -13, -24, 4, -13, -44, 67, -77, -24, 41, -68, 74, -10, -59, 82, 49, 44, 50, 15, 15,
+    -57, -18, 68, 73, 51, 32, -2, -57, -23, -21, -71, -57, 62, -8, -37, 58, -33, -14, -70, -14, 53, -73, -25, 82, -54, -70, 63, -23, 16, -5, 47, 32, 69,
+    -38, 38, 58, 40, 17, -3, 1, -72, 74, 76, -20, 52, -5, -25, 70, 27, 19, -78, 24, -12, -26, 47, 50, -66, 44, 50, -20, -40, 70, 83, 83, 65, -81};
+
+
+char str[256];
+int str_idx;
+// COap handler for local model
+// récupérer les zéros dans le model
+static int recuperer_zero(char * sortie,char * entree,int size)
+    {
+                  int k=0;
+                  int n=0;
+                  for (int i = 0; i<=size;i++)
+                    {
+                      sortie[k] = entree[i];
+
+                      if ((entree[i]=='\x01')&&(entree[i+1]=='\x03')&&(entree[i+2]=='\x01')&&(i<=size-2))
+                        {
+                          sortie[k]='\x00';
+
+                          i= i+2;
+                          n=n+2;
+
+                        }
+                       k++;
+                    }
+                  return n;
+    }
+
+// print UART serial com
+void printstringUART(char *Str, int size)
+{
+  str_idx=0;
+  memset(str,0x0,256);
+  str_idx=strlen(str);
+  sprintf(&str[str_idx],"%s,",Str);
+  otPlatUartSend(str,sizeof(str));
+  }
+
+//////////////////
+
+void float2Bytes(char bytes_temp[4],float float_variable){
+  memcpy(bytes_temp, (unsigned char*) (&float_variable), 4);
+}
+
+// procedure de l'envoi et reception du model à travers coap
+static void Model_coapHandler(void *aContext, otMessage *aMessage,
+                             const otMessageInfo *aMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+    otMessage *responseMessage;
+    otCoapCode responseCode = OT_COAP_CODE_CHANGED;
+    otCoapCode messageCode = otCoapMessageGetCode(aMessage);
+    otCoapType messageType = otCoapMessageGetType(aMessage);
+    responseMessage = otCoapNewMessage((otInstance*)aContext, NULL);
+    otEXPECT_ACTION(responseMessage != NULL, error = OT_ERROR_NO_BUFS);
+    otCoapMessageInitResponse(responseMessage, aMessage, OT_COAP_TYPE_ACKNOWLEDGMENT, responseCode);
+    otCoapMessageSetToken(responseMessage, otCoapMessageGetToken(aMessage),otCoapMessageGetTokenLength(aMessage));
+    otCoapMessageSetPayloadMarker(responseMessage);
+
+           if(OT_COAP_CODE_GET == messageCode)
+          {
+            error = otMessageAppend(responseMessage, model_data1,sizeof(model_data1));
+            otEXPECT(OT_ERROR_NONE == error);
+            error = otCoapSendResponse((otInstance*)aContext, responseMessage,aMessageInfo);
+            otEXPECT(OT_ERROR_NONE == error);
+          }
+        else if(OT_COAP_CODE_POST == messageCode)
+          {
+            char data[1000];
+            uint16_t offset = otMessageGetOffset(aMessage);
+            uint16_t read = otMessageRead(aMessage, offset, data, sizeof(data)-1);
+            data[read] = '\0';
+            strcpy((char *)model_data1, data);
+            int n = recuperer_zero((char *)model_data1, (char *)data, read);
+            printstringUART("post model done", 14);
+
+            if (OT_COAP_TYPE_CONFIRMABLE == messageType)
+              {
+                error = otMessageAppend(responseMessage,"model received" , sizeof("model received"));
+                otEXPECT(OT_ERROR_NONE==error);
+                error = otCoapSendResponse((otInstance*)aContext, responseMessage,aMessageInfo);
+                otEXPECT(OT_ERROR_NONE==error);
+                return;
+              }
+          
+    
+
+
+
+        }
+
+exit:
+
+    if (error != OT_ERROR_NONE && responseMessage != NULL)
+    {
+        otMessageFree(responseMessage);
+    }
+}
+
+
+// procedure de l'envoi et reception des infos actuelles à travers coap
+static void Actualinf_coapHandler(void *aContext, otMessage *aMessage,
+                             const otMessageInfo *aMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+    otMessage *responseMessage;
+    otCoapCode responseCode = OT_COAP_CODE_CHANGED;
+    otCoapCode messageCode = otCoapMessageGetCode(aMessage);
+    otCoapType messageType = otCoapMessageGetType(aMessage);
+    responseMessage = otCoapNewMessage((otInstance*)aContext, NULL);
+    otEXPECT_ACTION(responseMessage != NULL, error = OT_ERROR_NO_BUFS);
+    otCoapMessageInitResponse(responseMessage, aMessage, OT_COAP_TYPE_ACKNOWLEDGMENT, responseCode);
+    otCoapMessageSetToken(responseMessage, otCoapMessageGetToken(aMessage),otCoapMessageGetTokenLength(aMessage));
+    otCoapMessageSetPayloadMarker(responseMessage);
+
+            if(OT_COAP_CODE_GET == messageCode)
+                  {
+                    char  actual_inf[4] ="1234" ;
+                    accuracy = accuracy +0.5;
+                    float2Bytes(actual_inf, accuracy);
+                    printstringUART(actual_inf, 4);
+                    error = otMessageAppend(responseMessage, actual_inf,sizeof(actual_inf));
+                    otEXPECT(OT_ERROR_NONE == error);
+                    error = otCoapSendResponse((otInstance*)aContext, responseMessage,aMessageInfo);
+                    otEXPECT(OT_ERROR_NONE == error);
+                  }
+        else if(OT_COAP_CODE_POST == messageCode)
+                  {
+                    char data[1000];
+                    uint16_t offset = otMessageGetOffset(aMessage);
+                    uint16_t read = otMessageRead(aMessage, offset, data, sizeof(data)-1);
+                    data[read] = '\0';
+                    strcpy((char *)model_data1, data);
+                    int n = recuperer_zero((char *)model_data1, (char *)data, read);
+                    printstringUART("post mode done", 13);
+
+                    if (OT_COAP_TYPE_CONFIRMABLE == messageType)
+                      {
+                        error = otMessageAppend(responseMessage,"model received" , sizeof("model received"));
+                        otEXPECT(OT_ERROR_NONE==error);
+                        error = otCoapSendResponse((otInstance*)aContext, responseMessage,aMessageInfo);
+                        otEXPECT(OT_ERROR_NONE==error);
+                        return ;
+                      }
+                  }
+          
+    
+
+
+
+        }
+
+exit:
+
+    if (error != OT_ERROR_NONE && responseMessage != NULL)
+    {
+        otMessageFree(responseMessage);
+    }
+}
+
+// coap handler for heartbit discovery from server
+
+static void Heartbit_coapHandler(void *aContext, otMessage *aMessage,
+                             const otMessageInfo *aMessageInfo)
+{
+    otError error = OT_ERROR_NONE;
+    otMessage *responseMessage;
+    otCoapCode responseCode = OT_COAP_CODE_CHANGED;
+    otCoapCode messageCode = otCoapMessageGetCode(aMessage);
+    otCoapType messageType = otCoapMessageGetType(aMessage);
+
+    responseMessage = otCoapNewMessage((otInstance*)aContext, NULL);
+    otEXPECT_ACTION(responseMessage != NULL, error = OT_ERROR_NO_BUFS);
+
+    otCoapMessageInitResponse(responseMessage, aMessage, OT_COAP_TYPE_ACKNOWLEDGMENT, responseCode);
+    otCoapMessageSetToken(responseMessage, otCoapMessageGetToken(aMessage),
+                         otCoapMessageGetTokenLength(aMessage));
+    otCoapMessageSetPayloadMarker(responseMessage);
+
+    if(OT_COAP_CODE_GET == messageCode)
+    {
+
+        error = otMessageAppend(responseMessage, get_post_state,
+                                strlen((const char*)get_post_state));
+        otEXPECT(OT_ERROR_NONE == error);
+
+        error = otCoapSendResponse((otInstance*)aContext, responseMessage,
+                                   aMessageInfo);
+
+    }
+    else if(OT_COAP_CODE_POST == messageCode)
+    {
+                   char data[30];
+                   uint16_t offset = otMessageGetOffset(aMessage);
+                   uint16_t read = otMessageRead(aMessage, offset, data, sizeof(data)-1);
+                   data[read] = '\0';
+                   strcpy((char *)get_post_state, data);
+                   printstringUART((char *)get_post_state, read);
+                   if (OT_COAP_TYPE_CONFIRMABLE == messageType)
+                                {
+                                       error = otMessageAppend(responseMessage,get_post_state , sizeof(get_post_state));
+                                       otEXPECT(OT_ERROR_NONE==error);
+                                       error = otCoapSendResponse((otInstance*)aContext, responseMessage,aMessageInfo);
+                                       return;
+                                }
+        otEXPECT(OT_ERROR_NONE == error);
+
+    }
+
+exit:
+
+    if (error != OT_ERROR_NONE && responseMessage != NULL)
+    {
+        otMessageFree(responseMessage);
+    }
+}
+
+
+
+// Forward declarations
+otInstance *otGetInstance(void);
+void mtdReceiveCallback(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+extern void otSysEventSignalPending(void);
+
+// Variables
+static otUdpSocket         sMtdSocket;
+static bool                sButtonPressed                 = false;
+static bool                sRxOnIdleButtonPressed         = false;
+static bool                sAllowSleep                    = false;
+
+void sleepyInit(void)
+{
+    otError error;
+    otCliOutputFormat("sleepy-demo-mtd started\r\n");
+
+    otLinkModeConfig config;
+    SuccessOrExit(error = otLinkSetPollPeriod(otGetInstance(), SLEEPY_POLL_PERIOD_MS));
+
+    config.mRxOnWhenIdle = true;
+    config.mDeviceType   = 0;
+    config.mNetworkData  = 0;
+    SuccessOrExit(error = otThreadSetLinkMode(otGetInstance(), config));
+
+exit:
+    if (error != OT_ERROR_NONE)
+    {
+        otCliOutputFormat("Initialization failed with: %d, %s\r\n", error, otThreadErrorToString(error));
+    }
+    return;
+}
+
+/*
+ * Callback from sl_ot_is_ok_to_sleep to check if it is ok to go to sleep.
+ */
+bool efr32AllowSleepCallback(void)
+{
+    return sAllowSleep;
+}
+
+/*
+ * Override default network settings, such as panid, so the devices can join a network
+ */
+void setNetworkConfiguration(void)
+{
+    static char          aNetworkName[] = "OpenThreadDemo";
+    otError              error;
+    otOperationalDataset aDataset;
+
+    memset(&aDataset, 0, sizeof(otOperationalDataset));
+
+    /*
+     * Fields that can be configured in otOperationDataset to override defaults:
+     *     Network Name, Mesh Local Prefix, Extended PAN ID, PAN ID, Delay Timer,
+     *     Channel, Channel Mask Page 0, Network Master Key, PSKc, Security Policy
+     */
+    aDataset.mActiveTimestamp                      = 1;
+    aDataset.mComponents.mIsActiveTimestampPresent = true;
+
+    /* Set Channel to 15 */
+    aDataset.mChannel                      = 15;
+    aDataset.mComponents.mIsChannelPresent = true;
+
+    /* Set Pan ID to 2222 */
+    aDataset.mPanId                      = (otPanId)0x1234;
+    aDataset.mComponents.mIsPanIdPresent = true;
+
+    /* Set Extended Pan ID to C0DE1AB5C0DE1AB5 */
+    uint8_t extPanId[OT_EXT_PAN_ID_SIZE] = {0x11, 0x11, 0x11, 0x11, 0x22, 0x22, 0x22, 0x22};
+    memcpy(aDataset.mExtendedPanId.m8, extPanId, sizeof(aDataset.mExtendedPanId));
+    aDataset.mComponents.mIsExtendedPanIdPresent = true;
+
+    /* Set master key to 1234C0DE1AB51234C0DE1AB51234C0DE */
+    uint8_t key[OT_NETWORK_KEY_SIZE] = {0X00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+    memcpy(aDataset.mNetworkKey.m8, key, sizeof(aDataset.mNetworkKey));
+    aDataset.mComponents.mIsNetworkKeyPresent = true;
+
+    /* Set Network Name to SleepyEFR32 */
+    size_t length = strlen(aNetworkName);
+    assert(length <= OT_NETWORK_NAME_MAX_SIZE);
+    memcpy(aDataset.mNetworkName.m8, aNetworkName, length);
+    aDataset.mComponents.mIsNetworkNamePresent = true;
+
+    /* Set the Active Operational Dataset to this dataset */
+    error = otDatasetSetActive(otGetInstance(), &aDataset);
+    if (error != OT_ERROR_NONE)
+    {
+        otCliOutputFormat("otDatasetSetActive failed with: %d, %s\r\n", error, otThreadErrorToString(error));
+        return;
+    }
+}
+
+void initUdp(void)
+{
+    otError    error;
+    otSockAddr bindAddr;
+
+    // Initialize bindAddr
+    memset(&bindAddr, 0, sizeof(bindAddr));
+    bindAddr.mPort = RECV_PORT;
+
+    // Open the socket
+    error = otUdpOpen(otGetInstance(), &sMtdSocket, mtdReceiveCallback, NULL);
+    if (error != OT_ERROR_NONE)
+    {
+        otCliOutputFormat("MTD failed to open udp socket with: %d, %s\r\n", error, otThreadErrorToString(error));
+        return;
+    }
+
+    // Bind to the socket. Close the socket if bind fails.
+    error = otUdpBind(otGetInstance(), &sMtdSocket, &bindAddr, OT_NETIF_THREAD);
+    if (error != OT_ERROR_NONE)
+    {
+        otCliOutputFormat("MTD failed to bind udp socket with: %d, %s\r\n", error, otThreadErrorToString(error));
+        IgnoreReturnValue(otUdpClose(otGetInstance(), &sMtdSocket));
+        return;
+    }
+}
+
+inline uint16_t Swap16(uint16_t v)
+{
+    return (((v & 0x00ffU) << 8) & 0xff00) | (((v & 0xff00U) >> 8) & 0x00ff);
+}
+
+inline uint16_t HostSwap16(uint16_t v)
+{
+    return Swap16(v);
+}
+
+void printIPv6Addr(void)
+{
+  const otNetifAddress *unicastAddrs;
+
+  str_idx=0;
+  memset(str,0x0,256);
+  sprintf(str,"OpenThread CoAP test\r\nipaddr\r\n");
+  str_idx=strlen(str);
+  unicastAddrs = otIp6GetUnicastAddresses(otGetInstance());
+  const otNetifAddress *addr = unicastAddrs;
+  for (; addr; addr = addr->mNext){
+      str_idx=strlen(str);
+      sprintf(&str[str_idx],"%x:%x:%x:%x:%x:%x:%x:%x\r\n",
+              HostSwap16(addr->mAddress.mFields.m16[0]), HostSwap16(addr->mAddress.mFields.m16[1]),
+              HostSwap16(addr->mAddress.mFields.m16[2]), HostSwap16(addr->mAddress.mFields.m16[3]), HostSwap16(addr->mAddress.mFields.m16[4]),
+              HostSwap16(addr->mAddress.mFields.m16[5]), HostSwap16(addr->mAddress.mFields.m16[6]), HostSwap16(addr->mAddress.mFields.m16[7])
+             );
+  }
+
+  otPlatUartSend(str,sizeof(str));
+}
+
+/**@brief Function for sending a response to a request. */
+static void storedata_response_send(otMessage * p_request_message,
+                                    const otMessageInfo * p_message_info){
+  otError      error = OT_ERROR_NO_BUFS;
+  otMessage  * p_response;
+  otInstance * p_instance = otGetInstance();
+
+  //Create new message
+  p_response = otCoapNewMessage(p_instance, NULL);
+  if (p_response == NULL) {
+    printf(str,"Failed to allocate message for CoAP Request\r\n");
+    return;
+  }
+
+  do {
+  //Add CoAP type and code to the message
+    error = otCoapMessageInitResponse(p_response, p_request_message,
+                                      OT_COAP_TYPE_ACKNOWLEDGMENT,
+                                      OT_COAP_CODE_CHANGED);
+    if (error != OT_ERROR_NONE) { break; }
+
+  //Send the response
+    error = otCoapSendResponse(p_instance, p_response, p_message_info);
+  } while (false);
+
+  if (error != OT_ERROR_NONE) {
+    printf(str,"Failed to send store data response: %d\r\n", error);
+    otMessageFree(p_response);
+  }
+}
+
+/**@brief Function for handling a CoAP-request.
+*  Just store and print the text message.
+*  If it is a confirmable message it sends an acknowledgement. */
+static void storedata_request_handler(void * p_context, otMessage * p_message,
+                                      const otMessageInfo * p_message_info){
+  otCoapCode messageCode = otCoapMessageGetCode(p_message);
+  otCoapType messageType = otCoapMessageGetType(p_message);
+
+  do {
+    if (messageType != OT_COAP_TYPE_CONFIRMABLE &&
+        messageType != OT_COAP_TYPE_NON_CONFIRMABLE) {
+      break;
+    }
+    if (messageCode != OT_COAP_CODE_PUT) {
+      break;
+    }
+
+
+    otCliOutputFormat("\r\n");
+
+    if (messageType == OT_COAP_TYPE_CONFIRMABLE) {
+      storedata_response_send(p_message, p_message_info);
+    }
+  } while (false);
+}
+
+void sl_button_on_change(const sl_button_t *handle)
+{
+    if (sl_button_get_state(handle) == SL_SIMPLE_BUTTON_PRESSED)
+    {
+        if (&sl_button_btn0 == handle)
+        {
+            sRxOnIdleButtonPressed = true;
+
+
+
+        }
+        else if (&sl_button_btn1 == handle)
+        {
+            sButtonPressed = true;
+                                   printIPv6Addr();
+                                   otInstance * p_instance = otGetInstance();
+                                   otError e = otCoapStart(p_instance,OT_DEFAULT_COAP_PORT);
+
+
+                                   mResource_Temperature.mUriPath = mDDLStateUriPath;
+                                   mResource_Temperature.mContext= p_instance;
+                                   mResource_Temperature.mHandler = Model_coapHandler;
+
+                                   otCoapAddResource(p_instance,&mResource_Temperature);
+
+                                   mResource_Heartbit.mUriPath = heartUriPath;
+                                   mResource_Heartbit.mContext= p_instance;
+                                   mResource_Heartbit.mHandler = Heartbit_coapHandler;
+
+                                   otCoapAddResource(p_instance,&mResource_Heartbit);
+                                   
+                                   mResource_actualinf.mUriPath = actualinfUriPath;
+                                   mResource_actualinf.mContext= p_instance;
+                                   mResource_actualinf.mHandler = Actualinf_coapHandler;
+
+                                   otCoapAddResource(p_instance,&mResource_Heartbit);
+        }
+        otSysEventSignalPending();
+    }
+}
+
+#ifdef SL_CATALOG_KERNEL_PRESENT
+#define applicationTick sl_ot_rtos_application_tick
+#endif
+
+void applicationTick(void)
+{
+    otLinkModeConfig config;
+    otMessageInfo    messageInfo;
+    otMessage       *message = NULL;
+    const char      *payload = MTD_MESSAGE;
+
+    // Check for BTN0 button press
+    if (sRxOnIdleButtonPressed)
+    {
+        sRxOnIdleButtonPressed = false;
+        sAllowSleep            = !sAllowSleep;
+        config.mRxOnWhenIdle   = !sAllowSleep;
+        config.mDeviceType     = 0;
+        config.mNetworkData    = 0;
+        SuccessOrExit(otThreadSetLinkMode(otGetInstance(), config));
+
+#if (defined(SL_CATALOG_KERNEL_PRESENT) && defined(SL_CATALOG_POWER_MANAGER_PRESENT))
+        if (sAllowSleep)
+        {
+            sl_power_manager_remove_em_requirement(SL_POWER_MANAGER_EM1);
+        }
+        else
+        {
+            sl_power_manager_add_em_requirement(SL_POWER_MANAGER_EM1);
+        }
+#endif
+    }
+
+    // Check for BTN1 button press
+    if (sButtonPressed)
+    {
+        sButtonPressed = false;
+
+        // Get a message buffer
+        VerifyOrExit((message = otUdpNewMessage(otGetInstance(), NULL)) != NULL);
+
+        // Setup messageInfo
+        memset(&messageInfo, 0, sizeof(messageInfo));
+        SuccessOrExit(otIp6AddressFromString(MULTICAST_ADDR, &messageInfo.mPeerAddr));
+        messageInfo.mPeerPort = MULTICAST_PORT;
+
+        // Append the MTD_MESSAGE payload to the message buffer
+        SuccessOrExit(otMessageAppend(message, payload, (uint16_t)strlen(payload)));
+
+        // Send the button press message
+        SuccessOrExit(otUdpSend(otGetInstance(), &sMtdSocket, message, &messageInfo));
+
+        // Set message pointer to NULL so it doesn't get free'd by this function.
+        // otUdpSend() executing successfully means OpenThread has taken ownership
+        // of the message buffer.
+        message = NULL;
+    }
+
+exit:
+    if (message != NULL)
+    {
+        otMessageFree(message);
+    }
+    return;
+}
+
+void mtdReceiveCallback(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo)
+{
+    OT_UNUSED_VARIABLE(aContext);
+    OT_UNUSED_VARIABLE(aMessageInfo);
+    uint8_t buf[64];
+    int     length;
+
+    // Read the received message's payload
+    length      = otMessageRead(aMessage, otMessageGetOffset(aMessage), buf, sizeof(buf) - 1);
+    buf[length] = '\0';
+
+    // Check that the payload matches FTD_MESSAGE
+    VerifyOrExit(strncmp((char *)buf, FTD_MESSAGE, sizeof(FTD_MESSAGE)) == 0);
+
+    // Toggle LED0
+    sl_led_toggle(&sl_led_led0);
+    otCliOutputFormat("Message Received: %s\r\n", buf);
+
+exit:
+    return;
+}
