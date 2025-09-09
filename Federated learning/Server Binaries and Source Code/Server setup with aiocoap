@@ -1,0 +1,154 @@
+🔹 Steps to Communicate Raspberry Pi (RCP) with Two Thunderboard Sense 2 Devices using Python + CoAP
+
+1. Prepare the Raspberry Pi with OTBR
+
+Install Docker OTBR on Raspberry Pi.
+👉 OTBR Docker Setup Guide
+
+Make sure Docker is running and Raspberry Pi is updated:
+
+sudo apt update && sudo apt upgrade -y
+
+
+
+---
+
+2. Flash Thunderboard Sense 2 as RCP (for Raspberry Pi)
+
+The Thunderboard connected to the Raspberry Pi must run the RCP firmware (ot-rcp).
+👉 How to Build and Flash RCP
+
+Steps:
+
+1. Download/build the ot-rcp firmware for BRD4166A (Thunderboard Sense 2).
+
+
+2. Flash it using Simplicity Studio or Commander.
+
+
+3. Plug the board into Raspberry Pi via USB.
+
+
+
+
+
+---
+
+3. Flash the Two Other Thunderboard Sense 2 Devices
+
+Flash OpenThread CLI FTD firmware (or CoAP example firmware) on both boards.
+
+These will act as Thread end devices.
+
+
+After flashing, power them via USB or battery.
+
+
+
+---
+
+4. Start the Thread Network on Raspberry Pi
+
+Inside OTBR container:
+
+docker exec -it otbr sh
+ot-ctl
+> dataset init new
+> dataset commit active
+> ifconfig up
+> thread start
+
+Check the Border Router state:
+
+> state
+leader
+
+
+---
+
+5. Join the Other Thunderboard Sense 2 Devices
+
+On each end-device Thunderboard (with ot-cli-ftd firmware), connect via USB serial and run:
+
+> ifconfig up
+> thread start
+
+They will automatically join the network if the OTBR is running as Commissioner.
+
+On the Raspberry Pi (ot-ctl):
+
+> neighbor table
+
+You should see the two Thunderboard devices listed.
+
+
+
+---
+
+6. Install Python CoAP Client on Raspberry Pi
+
+Install aiocoap:
+
+pip install aiocoap
+
+
+---
+
+7. Get IP Addresses of the Two Thunderboards
+
+From Raspberry Pi (ot-ctl):
+
+> ipaddr
+
+Each device will have a Link-Local and a Mesh-Local IPv6 address (usually starting with fdxx::).
+Use those addresses for CoAP communication.
+
+
+---
+
+8. Communicate via CoAP in Python
+
+Example: query temperature sensor from both Thunderboards.
+
+import asyncio
+from aiocoap import *
+
+async def query_device(ip, resource):
+    protocol = await Context.create_client_context()
+    uri = f"coap://[{ip}]/{resource}"
+    request = Message(code=GET, uri=uri)
+
+    try:
+        response = await protocol.request(request).response
+        print(f"Device {ip} -> {resource}: {response.payload.decode()}")
+    except Exception as e:
+        print(f"Failed to fetch from {ip}: {e}")
+
+async def main():
+    # Replace with real Mesh-Local IPv6 addresses from ot-ctl
+    devices = [
+        "fd11:22::abcd",  # Thunderboard #1
+        "fd11:22::ef01"   # Thunderboard #2
+    ]
+
+    tasks = [query_device(ip, "sensor/temp") for ip in devices]
+    await asyncio.gather(*tasks)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+Replace sensor/temp with the CoAP resources actually available on your firmware.
+
+You can also query humidity, light, or custom endpoints.
+
+
+
+---
+
+✅ Final Result
+
+Raspberry Pi (OTBR) controls the Thread network using Thunderboard Sense 2 as RCP.
+
+Two Thunderboard Sense 2 devices join the network as end devices.
+
+Using Python + CoAP, Raspberry Pi can query data from both Thunderboards (temperature, humidity, etc.).
